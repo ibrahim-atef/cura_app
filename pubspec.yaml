@@ -31,10 +31,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_inappwebview: ^6.0.0
-  webview_windows: ^0.1.0+4
+  url_launcher: ^6.2.0
   cupertino_icons: ^1.0.8
-  webview_flutter:
-  webview_flutter_wkwebview:
 
 dev_dependencies:
   flutter_test:

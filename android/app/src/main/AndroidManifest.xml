@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.anmka.cura">
+    package="com.anmka.curaa">
     <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="cura_app"

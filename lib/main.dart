@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
-// Import the new package for Windows
-import 'package:webview_windows/webview_windows.dart';
-// Import screen_protector for Android/iOS
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:screen_protector/screen_protector.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const CuraApp());
@@ -37,167 +34,31 @@ class WebViewScreen extends StatefulWidget {
 }
 
 class _WebViewScreenState extends State<WebViewScreen> {
-  // Now handle two different types of controllers
-  WebViewController? _androidIosController;
-  final _windowsController = WebviewController();
+  InAppWebViewController? _webViewController;
   double _loadingProgress = 0.0;
   bool _isLoading = true;
   String? _errorMessage;
   bool _hasLoadedSuccessfully = false;
-
-  // Flag to check if it's a Windows platform
-  bool get _isWindows => defaultTargetPlatform == TargetPlatform.windows;
+  final String _initialUrl = 'https://appcura.anmka.com/';
 
   @override
   void initState() {
     super.initState();
-    _initializeWebView();
     _initializeScreenProtector();
   }
 
   /// Initialize screen protection on Android/iOS
   Future<void> _initializeScreenProtector() async {
-    if (!_isWindows) {
-      try {
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          debugPrint('🛡️ Enabling Android screen protection...');
-          await ScreenProtector.protectDataLeakageOn();
-        } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-          debugPrint('🛡️ Enabling iOS screenshot prevention...');
-          await ScreenProtector.preventScreenshotOn();
-        }
-      } catch (e) {
-        debugPrint('❌ ScreenProtector init error: $e');
+    try {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        debugPrint('🛡️ Enabling Android screen protection...');
+        await ScreenProtector.protectDataLeakageOn();
+      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+        debugPrint('🛡️ Enabling iOS screenshot prevention...');
+        await ScreenProtector.preventScreenshotOn();
       }
-    }
-  }
-
-  void _initializeWebView() async {
-    debugPrint('🔧 Initializing WebView...');
-
-    if (_isWindows) {
-      // Windows-specific initialization
-      debugPrint('💻 Using WebView for Windows');
-      try {
-        await _windowsController.initialize();
-        _windowsController.url.listen((url) {
-          debugPrint('🚀 Windows Page started loading: $url');
-          if (mounted) {
-            setState(() {
-              _isLoading = true;
-              _errorMessage = null;
-            });
-          }
-        });
-        _windowsController.loadingState.listen((state) {
-          if (mounted) {
-            setState(() {
-              if (state == LoadingState.loading) {
-                _loadingProgress = 0.5;
-                _isLoading = true;
-              } else if (state == LoadingState.navigationCompleted) {
-                _loadingProgress = 1.0;
-                _isLoading = false;
-                _hasLoadedSuccessfully = true;
-                _errorMessage = null;
-              }
-            });
-          }
-        });
-        await _windowsController.loadUrl('https://cura.anmka.com/');
-      } catch (e) {
-        debugPrint('❌ Windows WebView Initialization Error: $e');
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Failed to initialize WebView on Windows: $e';
-            _isLoading = false;
-          });
-        }
-      }
-    } else {
-      // Android/iOS-specific initialization
-      debugPrint('📱 Using Android/iOS WebView');
-      late final PlatformWebViewControllerCreationParams params;
-
-      if (WebViewPlatform.instance is WebKitWebViewPlatform) {
-        debugPrint('🍎 Using WebKit WebView (iOS)');
-        params = WebKitWebViewControllerCreationParams(
-          allowsInlineMediaPlayback: true,
-        );
-      } else {
-        debugPrint('🤖 Using Android WebView');
-        params = const PlatformWebViewControllerCreationParams();
-      }
-
-      final WebViewController controller =
-          WebViewController.fromPlatformCreationParams(params);
-
-      debugPrint('⚙️ Configuring WebView settings...');
-      controller
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(Colors.transparent)
-        ..enableZoom(true)
-        ..setUserAgent(
-            'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36')
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onProgress: (int progress) {
-              debugPrint('📊 Loading progress: $progress%');
-              if (mounted) {
-                setState(() {
-                  _loadingProgress = progress / 100;
-                });
-              }
-            },
-            onPageStarted: (String url) {
-              debugPrint('🚀 Page started loading: $url');
-              if (mounted) {
-                setState(() {
-                  _loadingProgress = 0.0;
-                  _isLoading = true;
-                  _errorMessage = null;
-                });
-              }
-            },
-            onPageFinished: (String url) {
-              debugPrint('✅ Page finished loading: $url');
-              if (mounted) {
-                setState(() {
-                  _loadingProgress = 1.0;
-                  _isLoading = false;
-                  _hasLoadedSuccessfully = true;
-                  _errorMessage = null;
-                });
-              }
-            },
-            onWebResourceError: (WebResourceError error) {
-              debugPrint('❌ WebView Error: ${error.description}');
-              debugPrint('❌ Error Code: ${error.errorCode}');
-              debugPrint('❌ Error Type: ${error.errorType}');
-              debugPrint('❌ Has Loaded Successfully: $_hasLoadedSuccessfully');
-
-              if (!_hasLoadedSuccessfully &&
-                  !error.description.contains('ERR_NAME_NOT_RESOLVED') &&
-                  !error.description.contains('ERR_CONNECTION_REFUSED') &&
-                  !error.description.contains('ERR_INTERNET_DISCONNECTED')) {
-                if (mounted) {
-                  setState(() {
-                    _errorMessage = 'خطأ في تحميل الصفحة: ${error.description}';
-                    _isLoading = false;
-                  });
-                }
-              }
-            },
-            onNavigationRequest: (NavigationRequest request) {
-              debugPrint('🧭 Navigation request: ${request.url}');
-              return NavigationDecision.navigate;
-            },
-          ),
-        )
-        ..loadRequest(Uri.parse('https://cura.anmka.com/'));
-
-      debugPrint('🌐 Loading URL: https://cura.anmka.com/');
-      _androidIosController = controller;
+    } catch (e) {
+      debugPrint('❌ ScreenProtector init error: $e');
     }
   }
 
@@ -211,25 +72,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
         _hasLoadedSuccessfully = false;
       });
     }
-
-    if (_isWindows) {
-      _windowsController.loadUrl('https://cura.anmka.com/');
-    } else {
-      _androidIosController?.reload();
-    }
+    _webViewController?.reload();
   }
 
   @override
   void dispose() {
-    if (_isWindows) {
-      _windowsController.dispose();
-    } else {
-      // Disable screen protection when leaving
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        ScreenProtector.protectDataLeakageOff();
-      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-        ScreenProtector.preventScreenshotOff();
-      }
+    // Disable screen protection when leaving
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      ScreenProtector.protectDataLeakageOff();
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      ScreenProtector.preventScreenshotOff();
     }
     super.dispose();
   }
@@ -244,11 +96,203 @@ class _WebViewScreenState extends State<WebViewScreen> {
           },
           child: Stack(
             children: [
-              // Use the correct WebView widget based on the platform
-              if (_isWindows)
-                Webview(_windowsController)
-              else if (_androidIosController != null)
-                WebViewWidget(controller: _androidIosController!),
+              InAppWebView(
+                initialUrlRequest: URLRequest(
+                  url: WebUri(_initialUrl),
+                ),
+                initialSettings: InAppWebViewSettings(
+                  javaScriptEnabled: true,
+                  javaScriptCanOpenWindowsAutomatically: true,
+                  mediaPlaybackRequiresUserGesture: false,
+                  allowsInlineMediaPlayback: true,
+                  mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+                  useHybridComposition: true,
+                  useShouldOverrideUrlLoading: true,
+                  allowFileAccessFromFileURLs: true,
+                  allowUniversalAccessFromFileURLs: true,
+                  domStorageEnabled: true,
+                  databaseEnabled: true,
+                  cacheEnabled: true,
+                  clearCache: false,
+                  supportZoom: true,
+                  builtInZoomControls: true,
+                  displayZoomControls: false,
+                  userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                  // Prevent popups and dialogs
+                  supportMultipleWindows: false,
+                  disableContextMenu: true,
+                ),
+                onWebViewCreated: (controller) {
+                  _webViewController = controller;
+                  debugPrint('🔧 WebView created');
+                },
+                onLoadStart: (controller, url) {
+                  debugPrint('🚀 Page started loading: $url');
+                  if (mounted) {
+                    setState(() {
+                      _loadingProgress = 0.0;
+                      _isLoading = true;
+                      _errorMessage = null;
+                    });
+                  }
+                },
+                onLoadStop: (controller, url) async {
+                  debugPrint('✅ Page finished loading: $url');
+                  if (mounted) {
+                    setState(() {
+                      _loadingProgress = 1.0;
+                      _isLoading = false;
+                      _hasLoadedSuccessfully = true;
+                      _errorMessage = null;
+                    });
+                  }
+                },
+                onProgressChanged: (controller, progress) {
+                  debugPrint('📊 Loading progress: $progress%');
+                  if (mounted) {
+                    setState(() {
+                      _loadingProgress = progress / 100;
+                    });
+                  }
+                },
+                onReceivedError: (controller, request, error) {
+                  debugPrint('❌ WebView Error: ${error.description}');
+                  if (!_hasLoadedSuccessfully) {
+                    if (mounted) {
+                      setState(() {
+                        _errorMessage = 'خطأ في تحميل الصفحة: ${error.description}';
+                        _isLoading = false;
+                      });
+                    }
+                  }
+                },
+                onPermissionRequest: (controller, request) async {
+                  debugPrint('🎥 Permission requested: ${request.resources}');
+                  // Automatically grant all permissions without showing popup
+                  return PermissionResponse(
+                    resources: request.resources,
+                    action: PermissionResponseAction.GRANT,
+                  );
+                },
+                onJsAlert: (controller, jsAlertRequest) async {
+                  // Block JavaScript alerts
+                  return JsAlertResponse(
+                    handledByClient: true,
+                  );
+                },
+                onJsConfirm: (controller, jsConfirmRequest) async {
+                  // Block JavaScript confirms
+                  return JsConfirmResponse(
+                    handledByClient: true,
+                    action: JsConfirmResponseAction.CONFIRM,
+                  );
+                },
+                onJsPrompt: (controller, jsPromptRequest) async {
+                  // Block JavaScript prompts
+                  return JsPromptResponse(
+                    handledByClient: true,
+                    action: JsPromptResponseAction.CONFIRM,
+                  );
+                },
+                shouldOverrideUrlLoading: (controller, navigationAction) async {
+                  final url = navigationAction.request.url;
+                  debugPrint('🧭 Navigation request: $url');
+                  
+                  if (url != null) {
+                    final urlString = url.toString();
+                    
+                    // Handle Android Intent URLs specially
+                    if (urlString.startsWith('intent://')) {
+                      try {
+                        // Parse the intent URL to extract the actual scheme and package
+                        // Format: intent://...#Intent;scheme=SCHEME;package=PACKAGE;end
+                        final intentMatch = RegExp(r'intent://(.+)#Intent;scheme=([^;]+);package=([^;]+);end').firstMatch(urlString);
+                        
+                        if (intentMatch != null) {
+                          final scheme = intentMatch.group(2);
+                          final packageName = intentMatch.group(3);
+                          final path = intentMatch.group(1);
+                          
+                          // Try the app-specific scheme first (e.g., fb-messenger://)
+                          final appUrl = '$scheme://$path';
+                          debugPrint('🔄 Trying app URL: $appUrl');
+                          
+                          try {
+                            final uri = Uri.parse(appUrl);
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              debugPrint('✅ Opened with app scheme: $appUrl');
+                              return NavigationActionPolicy.CANCEL;
+                            }
+                          } catch (e) {
+                            debugPrint('⚠️ App scheme failed, trying package: $e');
+                          }
+                          
+                          // If app scheme fails, try opening the package directly
+                          final marketUrl = 'market://details?id=$packageName';
+                          try {
+                            final uri = Uri.parse(marketUrl);
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              debugPrint('✅ Opened Play Store for: $packageName');
+                            }
+                          } catch (e) {
+                            debugPrint('❌ Could not open app or Play Store: $e');
+                          }
+                        }
+                      } catch (e) {
+                        debugPrint('❌ Error parsing intent URL: $e');
+                      }
+                      return NavigationActionPolicy.CANCEL;
+                    }
+                    
+                    // Check if it's an external URL scheme (WhatsApp, tel, mailto, etc.)
+                    if (urlString.startsWith('whatsapp://') ||
+                        urlString.startsWith('tel:') ||
+                        urlString.startsWith('mailto:') ||
+                        urlString.startsWith('sms:') ||
+                        urlString.startsWith('fb://') ||
+                        urlString.startsWith('fb-messenger://') ||
+                        urlString.startsWith('instagram://') ||
+                        urlString.startsWith('twitter://') ||
+                        urlString.startsWith('tg://')) {
+                      // Try to launch the external app
+                      try {
+                        final uri = Uri.parse(urlString);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          debugPrint('✅ Opened external app: $urlString');
+                        } else {
+                          debugPrint('❌ Cannot launch: $urlString');
+                        }
+                      } catch (e) {
+                        debugPrint('❌ Error launching URL: $e');
+                      }
+                      return NavigationActionPolicy.CANCEL;
+                    }
+                    
+                    // Check if it's trying to open a new window/tab
+                    if (!navigationAction.isForMainFrame) {
+                      // Open external links in external browser
+                      try {
+                        final uri = Uri.parse(urlString);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          debugPrint('✅ Opened in external browser: $urlString');
+                        }
+                      } catch (e) {
+                        debugPrint('❌ Error opening external link: $e');
+                      }
+                      return NavigationActionPolicy.CANCEL;
+                    }
+                  }
+                  
+                  return NavigationActionPolicy.ALLOW;
+                },
+                onConsoleMessage: (controller, consoleMessage) {
+                  debugPrint('📝 Console: ${consoleMessage.message}');
+                },
+              ),
 
               if (_isLoading && _loadingProgress < 1.0)
                 Positioned(
@@ -264,50 +308,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   ),
                 ),
 
-              if (_errorMessage != null && !_hasLoadedSuccessfully)
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.all(20),
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.red[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red[200]!),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          color: Colors.red[600],
-                          size: 48,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.red[700],
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: _refreshWebView,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('إعادة المحاولة'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red[600],
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
+
+          ],
         ),
+      ),
       ),
     );
   }
