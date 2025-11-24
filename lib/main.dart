@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:flutter/material.dart';
 import 'package:screen_protector/screen_protector.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   runApp(const CuraApp());
@@ -34,12 +34,14 @@ class WebViewScreen extends StatefulWidget {
 }
 
 class _WebViewScreenState extends State<WebViewScreen> {
-  InAppWebViewController? _webViewController;
+  late final WebViewController _webViewController = _createWebViewController();
   double _loadingProgress = 0.0;
   bool _isLoading = true;
   String? _errorMessage;
   bool _hasLoadedSuccessfully = false;
-  final String _initialUrl = 'https://appcura.anmka.com/';
+  final Uri _initialUri = Uri.parse('https://cura.anmka.com/');
+  final Map<String, String> _anmkaHeaders = const {'X-App-Source': 'anmka'};
+  String? _lastHeaderInjectedUrl;
 
   @override
   void initState() {
@@ -73,14 +75,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       });
     }
     // Reload with custom header
-    _webViewController?.loadUrl(
-      urlRequest: URLRequest(
-        url: WebUri(_initialUrl),
-        headers: {
-          'X-App-Source': 'anmka',
-        },
-      ),
-    );
+    _webViewController.loadRequest(_initialUri, headers: _anmkaHeaders);
   }
 
   @override
@@ -94,6 +89,175 @@ class _WebViewScreenState extends State<WebViewScreen> {
     super.dispose();
   }
 
+  WebViewController _createWebViewController() {
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (url) {
+            debugPrint('🚀 Page started loading: $url');
+            if (mounted) {
+              setState(() {
+                _loadingProgress = 0.0;
+                _isLoading = true;
+                _errorMessage = null;
+                _hasLoadedSuccessfully = false;
+              });
+            }
+          },
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _loadingProgress = progress / 100;
+              });
+            }
+          },
+          onPageFinished: (url) {
+            debugPrint('✅ Page finished loading: $url');
+            if (mounted) {
+              setState(() {
+                _loadingProgress = 1.0;
+                _isLoading = false;
+                _hasLoadedSuccessfully = true;
+                _errorMessage = null;
+              });
+            }
+          },
+          onWebResourceError: (error) {
+            debugPrint('❌ WebView Error: ${error.description}');
+            if (!_hasLoadedSuccessfully && mounted) {
+              setState(() {
+                _errorMessage = 'خطأ في تحميل الصفحة: ${error.description}';
+                _isLoading = false;
+              });
+            }
+          },
+          onNavigationRequest: _handleNavigationRequest,
+        ),
+      )
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      )
+      ..loadRequest(_initialUri, headers: _anmkaHeaders);
+
+    return controller;
+  }
+
+  Future<NavigationDecision> _handleNavigationRequest(
+    NavigationRequest request,
+  ) async {
+    final urlString = request.url;
+    debugPrint('🧭 Navigation request: $urlString');
+
+    if (urlString.contains('appcura.anmka.com') && request.isMainFrame) {
+      if (_lastHeaderInjectedUrl == urlString) {
+        _lastHeaderInjectedUrl = null;
+        return NavigationDecision.navigate;
+      }
+      final uri = Uri.tryParse(urlString);
+      if (uri != null) {
+        try {
+          _lastHeaderInjectedUrl = urlString;
+          await _webViewController.loadRequest(uri, headers: _anmkaHeaders);
+          debugPrint('✅ Navigation with custom header: $urlString');
+        } catch (e) {
+          debugPrint('⚠️ Could not load with headers: $e');
+          _lastHeaderInjectedUrl = null;
+        }
+      }
+      return NavigationDecision.prevent;
+    }
+
+    if (urlString.startsWith('intent://')) {
+      await _handleIntentUrl(urlString);
+      return NavigationDecision.prevent;
+    }
+
+    if (_isExternalScheme(urlString)) {
+      final uri = Uri.tryParse(urlString);
+      if (uri != null) {
+        await _launchExternal(uri);
+      }
+      return NavigationDecision.prevent;
+    }
+
+    if (!request.isMainFrame) {
+      final uri = Uri.tryParse(urlString);
+      if (uri != null) {
+        await _launchExternal(uri);
+      }
+      return NavigationDecision.prevent;
+    }
+
+    return NavigationDecision.navigate;
+  }
+
+  Future<void> _handleIntentUrl(String urlString) async {
+    try {
+      final intentMatch = RegExp(
+        r'intent://(.+)#Intent;scheme=([^;]+);package=([^;]+);end',
+      ).firstMatch(urlString);
+
+      if (intentMatch == null) {
+        return;
+      }
+
+      final scheme = intentMatch.group(2);
+      final packageName = intentMatch.group(3);
+      final path = intentMatch.group(1);
+
+      if (scheme == null || path == null) {
+        return;
+      }
+
+      final appUrl = '$scheme://$path';
+      debugPrint('🔄 Trying app URL: $appUrl');
+
+      final appUri = Uri.tryParse(appUrl);
+      if (appUri != null && await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+        debugPrint('✅ Opened with app scheme: $appUrl');
+        return;
+      }
+
+      if (packageName != null) {
+        final marketUri = Uri.tryParse('market://details?id=$packageName');
+        if (marketUri != null && await canLaunchUrl(marketUri)) {
+          await launchUrl(marketUri, mode: LaunchMode.externalApplication);
+          debugPrint('✅ Opened store for: $packageName');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error parsing intent URL: $e');
+    }
+  }
+
+  bool _isExternalScheme(String urlString) {
+    return urlString.startsWith('whatsapp://') ||
+        urlString.startsWith('tel:') ||
+        urlString.startsWith('mailto:') ||
+        urlString.startsWith('sms:') ||
+        urlString.startsWith('fb://') ||
+        urlString.startsWith('fb-messenger://') ||
+        urlString.startsWith('instagram://') ||
+        urlString.startsWith('twitter://') ||
+        urlString.startsWith('tg://');
+  }
+
+  Future<void> _launchExternal(Uri uri) async {
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        debugPrint('✅ Opened external link: $uri');
+      } else {
+        debugPrint('❌ Cannot launch: $uri');
+      }
+    } catch (e) {
+      debugPrint('❌ Error launching URL: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -104,225 +268,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
           },
           child: Stack(
             children: [
-              InAppWebView(
-                initialUrlRequest: URLRequest(
-                  url: WebUri(_initialUrl),
-                  headers: {
-                    'X-App-Source': 'anmka',
-                  },
-                ),
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  javaScriptCanOpenWindowsAutomatically: true,
-                  mediaPlaybackRequiresUserGesture: false,
-                  allowsInlineMediaPlayback: true,
-                  mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-                  useHybridComposition: true,
-                  useShouldOverrideUrlLoading: true,
-                  allowFileAccessFromFileURLs: true,
-                  allowUniversalAccessFromFileURLs: true,
-                  domStorageEnabled: true,
-                  databaseEnabled: true,
-                  cacheEnabled: true,
-                  clearCache: false,
-                  supportZoom: true,
-                  builtInZoomControls: true,
-                  displayZoomControls: false,
-                  userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                  // Prevent popups and dialogs
-                  supportMultipleWindows: false,
-                  disableContextMenu: true,
-                ),
-                onWebViewCreated: (controller) {
-                  _webViewController = controller;
-                  debugPrint('🔧 WebView created');
-                },
-                onLoadStart: (controller, url) {
-                  debugPrint('🚀 Page started loading: $url');
-                  if (mounted) {
-                    setState(() {
-                      _loadingProgress = 0.0;
-                      _isLoading = true;
-                      _errorMessage = null;
-                    });
-                  }
-                },
-                onLoadStop: (controller, url) async {
-                  debugPrint('✅ Page finished loading: $url');
-                  if (mounted) {
-                    setState(() {
-                      _loadingProgress = 1.0;
-                      _isLoading = false;
-                      _hasLoadedSuccessfully = true;
-                      _errorMessage = null;
-                    });
-                  }
-                },
-                onProgressChanged: (controller, progress) {
-                  debugPrint('📊 Loading progress: $progress%');
-                  if (mounted) {
-                    setState(() {
-                      _loadingProgress = progress / 100;
-                    });
-                  }
-                },
-                onReceivedError: (controller, request, error) {
-                  debugPrint('❌ WebView Error: ${error.description}');
-                  if (!_hasLoadedSuccessfully) {
-                    if (mounted) {
-                      setState(() {
-                        _errorMessage = 'خطأ في تحميل الصفحة: ${error.description}';
-                        _isLoading = false;
-                      });
-                    }
-                  }
-                },
-                onPermissionRequest: (controller, request) async {
-                  debugPrint('🎥 Permission requested: ${request.resources}');
-                  // Automatically grant all permissions without showing popup
-                  return PermissionResponse(
-                    resources: request.resources,
-                    action: PermissionResponseAction.GRANT,
-                  );
-                },
-                onJsAlert: (controller, jsAlertRequest) async {
-                  // Block JavaScript alerts
-                  return JsAlertResponse(
-                    handledByClient: true,
-                  );
-                },
-                onJsConfirm: (controller, jsConfirmRequest) async {
-                  // Block JavaScript confirms
-                  return JsConfirmResponse(
-                    handledByClient: true,
-                    action: JsConfirmResponseAction.CONFIRM,
-                  );
-                },
-                onJsPrompt: (controller, jsPromptRequest) async {
-                  // Block JavaScript prompts
-                  return JsPromptResponse(
-                    handledByClient: true,
-                    action: JsPromptResponseAction.CONFIRM,
-                  );
-                },
-                shouldOverrideUrlLoading: (controller, navigationAction) async {
-                  final url = navigationAction.request.url;
-                  debugPrint('🧭 Navigation request: $url');
-                  
-                  if (url != null) {
-                    final urlString = url.toString();
-                    
-                    // Add custom header for appcura.anmka.com requests
-                    if (urlString.contains('appcura.anmka.com') && navigationAction.isForMainFrame) {
-                      try {
-                        await controller.loadUrl(
-                          urlRequest: URLRequest(
-                            url: url,
-                            headers: {
-                              'X-App-Source': 'anmka',
-                            },
-                          ),
-                        );
-                        debugPrint('✅ Navigation with custom header: $urlString');
-                        return NavigationActionPolicy.CANCEL;
-                      } catch (e) {
-                        debugPrint('⚠️ Could not load with headers: $e');
-                      }
-                    }
-                    
-                    // Handle Android Intent URLs specially
-                    if (urlString.startsWith('intent://')) {
-                      try {
-                        // Parse the intent URL to extract the actual scheme and package
-                        // Format: intent://...#Intent;scheme=SCHEME;package=PACKAGE;end
-                        final intentMatch = RegExp(r'intent://(.+)#Intent;scheme=([^;]+);package=([^;]+);end').firstMatch(urlString);
-                        
-                        if (intentMatch != null) {
-                          final scheme = intentMatch.group(2);
-                          final packageName = intentMatch.group(3);
-                          final path = intentMatch.group(1);
-                          
-                          // Try the app-specific scheme first (e.g., fb-messenger://)
-                          final appUrl = '$scheme://$path';
-                          debugPrint('🔄 Trying app URL: $appUrl');
-                          
-                          try {
-                            final uri = Uri.parse(appUrl);
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
-                              debugPrint('✅ Opened with app scheme: $appUrl');
-                              return NavigationActionPolicy.CANCEL;
-                            }
-                          } catch (e) {
-                            debugPrint('⚠️ App scheme failed, trying package: $e');
-                          }
-                          
-                          // If app scheme fails, try opening the package directly
-                          final marketUrl = 'market://details?id=$packageName';
-                          try {
-                            final uri = Uri.parse(marketUrl);
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
-                              debugPrint('✅ Opened Play Store for: $packageName');
-                            }
-                          } catch (e) {
-                            debugPrint('❌ Could not open app or Play Store: $e');
-                          }
-                        }
-                      } catch (e) {
-                        debugPrint('❌ Error parsing intent URL: $e');
-                      }
-                      return NavigationActionPolicy.CANCEL;
-                    }
-                    
-                    // Check if it's an external URL scheme (WhatsApp, tel, mailto, etc.)
-                    if (urlString.startsWith('whatsapp://') ||
-                        urlString.startsWith('tel:') ||
-                        urlString.startsWith('mailto:') ||
-                        urlString.startsWith('sms:') ||
-                        urlString.startsWith('fb://') ||
-                        urlString.startsWith('fb-messenger://') ||
-                        urlString.startsWith('instagram://') ||
-                        urlString.startsWith('twitter://') ||
-                        urlString.startsWith('tg://')) {
-                      // Try to launch the external app
-                      try {
-                        final uri = Uri.parse(urlString);
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                          debugPrint('✅ Opened external app: $urlString');
-                        } else {
-                          debugPrint('❌ Cannot launch: $urlString');
-                        }
-                      } catch (e) {
-                        debugPrint('❌ Error launching URL: $e');
-                      }
-                      return NavigationActionPolicy.CANCEL;
-                    }
-                    
-                    // Check if it's trying to open a new window/tab
-                    if (!navigationAction.isForMainFrame) {
-                      // Open external links in external browser
-                      try {
-                        final uri = Uri.parse(urlString);
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                          debugPrint('✅ Opened in external browser: $urlString');
-                        }
-                      } catch (e) {
-                        debugPrint('❌ Error opening external link: $e');
-                      }
-                      return NavigationActionPolicy.CANCEL;
-                    }
-                  }
-                  
-                  return NavigationActionPolicy.ALLOW;
-                },
-                onConsoleMessage: (controller, consoleMessage) {
-                  debugPrint('📝 Console: ${consoleMessage.message}');
-                },
-              ),
-
+              WebViewWidget(controller: _webViewController),
               if (_isLoading && _loadingProgress < 1.0)
                 Positioned(
                   top: 0,
@@ -336,11 +282,37 @@ class _WebViewScreenState extends State<WebViewScreen> {
                     minHeight: 3,
                   ),
                 ),
-
-
-          ],
+              if (_errorMessage != null && !_isLoading)
+                Container(
+                  color: Colors.white,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _errorMessage!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: _refreshWebView,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('إعادة المحاولة'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

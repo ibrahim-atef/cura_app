@@ -1,0 +1,42 @@
+PODS:
+  - Flutter (1.0.0)
+  - screen_protector (1.2.1):
+    - Flutter
+    - ScreenProtectorKit (~> 1.3.1)
+  - ScreenProtectorKit (1.3.1)
+  - url_launcher_ios (0.0.1):
+    - Flutter
+  - webview_flutter_wkwebview (0.0.1):
+    - Flutter
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - screen_protector (from `.symlinks/plugins/screen_protector/ios`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
+  - webview_flutter_wkwebview (from `.symlinks/plugins/webview_flutter_wkwebview/darwin`)
+
+SPEC REPOS:
+  trunk:
+    - ScreenProtectorKit
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  screen_protector:
+    :path: ".symlinks/plugins/screen_protector/ios"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
+  webview_flutter_wkwebview:
+    :path: ".symlinks/plugins/webview_flutter_wkwebview/darwin"
+
+SPEC CHECKSUMS:
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  screen_protector: 3d90d44ac886b25335aebd93230b454aef45794a
+  ScreenProtectorKit: 83a6281b02c7a5902ee6eac4f5045f674e902ae4
+  url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
+  webview_flutter_wkwebview: 1821ceac936eba6f7984d89a9f3bcb4dea99ebb2
+
+PODFILE CHECKSUM: 4305caec6b40dde0ae97be1573c53de1882a07e5
+
+COCOAPODS: 1.16.2
