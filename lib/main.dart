@@ -72,7 +72,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
         _hasLoadedSuccessfully = false;
       });
     }
-    _webViewController?.reload();
+    // Reload with custom header
+    _webViewController?.loadUrl(
+      urlRequest: URLRequest(
+        url: WebUri(_initialUrl),
+        headers: {
+          'X-App-Source': 'anmka',
+        },
+      ),
+    );
   }
 
   @override
@@ -99,6 +107,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
               InAppWebView(
                 initialUrlRequest: URLRequest(
                   url: WebUri(_initialUrl),
+                  headers: {
+                    'X-App-Source': 'anmka',
+                  },
                 ),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
@@ -200,6 +211,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   
                   if (url != null) {
                     final urlString = url.toString();
+                    
+                    // Add custom header for appcura.anmka.com requests
+                    if (urlString.contains('appcura.anmka.com') && navigationAction.isForMainFrame) {
+                      try {
+                        await controller.loadUrl(
+                          urlRequest: URLRequest(
+                            url: url,
+                            headers: {
+                              'X-App-Source': 'anmka',
+                            },
+                          ),
+                        );
+                        debugPrint('✅ Navigation with custom header: $urlString');
+                        return NavigationActionPolicy.CANCEL;
+                      } catch (e) {
+                        debugPrint('⚠️ Could not load with headers: $e');
+                      }
+                    }
                     
                     // Handle Android Intent URLs specially
                     if (urlString.startsWith('intent://')) {
